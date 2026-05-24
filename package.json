@@ -1,0 +1,140 @@
+{
+  "name": "kung-commit",
+  "displayName": "Kung Commit",
+  "description": "Generate conventional commit messages from your git changes using AI",
+  "version": "0.1.0",
+  "publisher": "kung-commit",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "conventional-commit"
+  ],
+  "activationEvents": [
+    "onCommand:kungCommit.generateMessage",
+    "onView:scm",
+    "onStartupFinished"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kungCommit.generateMessage",
+        "title": "Kung Commit: Generate Commit Message",
+        "icon": {
+          "light": "media/icon-light.svg",
+          "dark": "media/icon-dark.svg"
+        }
+      }
+    ],
+    "menus": {
+      "scm/inputBox/action": [
+        {
+          "command": "kungCommit.generateMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kung Commit",
+      "properties": {
+        "kungCommit.provider": {
+          "type": "string",
+          "default": "deepseek",
+          "enum": [
+            "openai",
+            "anthropic",
+            "deepseek",
+            "custom"
+          ],
+          "description": "AI provider to use for generating commit messages"
+        },
+        "kungCommit.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for the AI provider. Can also be set via the `KUNG_COMMIT_API_KEY` environment variable."
+        },
+        "kungCommit.model": {
+          "type": "string",
+          "default": "deepseek-chat",
+          "description": "Model name to use (e.g., gpt-4o-mini for OpenAI, deepseek-chat for DeepSeek, claude-sonnet-4-20250514 for Anthropic)"
+        },
+        "kungCommit.customEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Custom API endpoint URL (only used when provider is 'custom')"
+        },
+        "kungCommit.customModel": {
+          "type": "string",
+          "default": "",
+          "description": "Custom model name (only used when provider is 'custom')"
+        },
+        "kungCommit.customHeaders": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Additional HTTP headers for the custom endpoint",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "kungCommit.promptTemplate": {
+          "type": "string",
+          "default": "Generate a concise conventional commit message for these changes:\n\n{{diff}}",
+          "markdownDescription": "Custom prompt template. Use `{{diff}}` as placeholder for the git diff content."
+        },
+        "kungCommit.maxDiffChars": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 500,
+          "maximum": 50000,
+          "description": "Maximum number of characters to send from the diff"
+        },
+        "kungCommit.locale": {
+          "type": "string",
+          "default": "en",
+          "description": "Locale for the generated commit message (e.g., 'en', 'ja', 'zh-CN')"
+        },
+        "kungCommit.autoPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a preview of the generated message before inserting it into the commit input box"
+        },
+        "kungCommit.showCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 'Generate AI Commit Message' CodeLens in diff editors"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch=forever",
+    "lint": "echo linting",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "esbuild": "^0.20.0",
+    "@vscode/test-web": "^0.0.46"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kung-commit/vscode-kung-commit"
+  }
+}
