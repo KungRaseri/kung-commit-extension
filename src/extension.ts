@@ -47,8 +47,8 @@ async function handleGenerateCommitMessage(): Promise<void> {
             return;
         }
 
-        // 3. Inject the generated message into the SCM input box
-        await setScmInputBoxValue(message, config.autoPreview);
+        // 3. Inject the generated message directly into the SCM input box
+        await setScmInputBoxValue(message);
     } catch (error: any) {
         const msg = error.message || 'Unknown error';
 
@@ -96,10 +96,7 @@ async function handleGenerateCommitMessage(): Promise<void> {
 // SCM Input Box Integration
 // ---------------------------------------------------------------------------
 
-async function setScmInputBoxValue(
-    message: string,
-    autoPreview: boolean,
-): Promise<void> {
+async function setScmInputBoxValue(message: string): Promise<void> {
     const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
     if (!gitExt) {
         throw new Error('Git extension not found.');
@@ -116,28 +113,8 @@ async function setScmInputBoxValue(
         throw new Error('No Git repository found.');
     }
 
-    if (autoPreview) {
-        // Show an input box with the generated message for the user to edit/confirm
-        const result = await vscode.window.showInputBox({
-            value: message,
-            prompt: 'Edit or confirm the AI-generated commit message',
-            placeHolder: 'Commit message',
-            ignoreFocusOut: true,
-            valueSelection: [0, message.length],
-            validateInput: (input) => {
-                return input.trim().length === 0 ? 'Commit message cannot be empty.' : null;
-            },
-        });
-
-        if (result !== undefined) {
-            repository.inputBox.value = result;
-            repository.inputBox.valueSelection = [result.length, result.length]; // Place cursor at end
-        }
-        // If the user cancelled (result === undefined), do nothing
-    } else {
-        repository.inputBox.value = message;
-        repository.inputBox.valueSelection = [0, message.length]; // Select all for easy replacement
-    }
+    // Set the message directly into the SCM input box without prompting
+    repository.inputBox.value = message;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,14 +138,11 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(codeLensDisposable);
     }
 
-    // 3. Listen for configuration changes and re-register CodeLens if needed
+    // 3. Listen for configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('kungCommit.showCodeLens')) {
                 const newConfig = getConfig();
-                // Note: Full dynamic re-registration would require tracking
-                // the disposable, which adds complexity. For v1 we simply log
-                // the change; the user can reload the window to pick up changes.
                 console.log(
                     `Kung Commit: showCodeLens changed to ${newConfig.showCodeLens}. Reload window to apply.`,
                 );

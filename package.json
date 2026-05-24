@@ -6,7 +6,7 @@
   "publisher": "kung-commit",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.96.0"
   },
   "categories": [
     "SCM Providers",
@@ -39,7 +39,7 @@
       }
     ],
     "menus": {
-      "scm/inputBox/action": [
+      "scm/title": [
         {
           "command": "kungCommit.generateMessage",
           "group": "navigation",
@@ -127,7 +127,7 @@
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.96.0",
     "@types/node": "^20.11.0",
     "typescript": "^5.4.0",
     "esbuild": "^0.20.0",
