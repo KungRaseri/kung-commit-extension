@@ -2,7 +2,7 @@
   "name": "kung-commit",
   "displayName": "Kung Commit",
   "description": "Generate conventional commit messages from your git changes using AI",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "kung-commit",
   "license": "MIT",
   "engines": {
@@ -20,6 +20,7 @@
   ],
   "activationEvents": [
     "onCommand:kungCommit.generateMessage",
+    "onCommand:kungCommit.generatePRDescription",
     "onView:scm",
     "onStartupFinished"
   ],
@@ -36,12 +37,22 @@
           "light": "media/icon-light.svg",
           "dark": "media/icon-dark.svg"
         }
+      },
+      {
+        "command": "kungCommit.generatePRDescription",
+        "title": "Kung Commit: Generate PR Description",
+        "icon": "$(git-pull-request)"
       }
     ],
     "menus": {
       "scm/title": [
         {
           "command": "kungCommit.generateMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        },
+        {
+          "command": "kungCommit.generatePRDescription",
           "group": "navigation",
           "when": "scmProvider == git"
         }
@@ -115,6 +126,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show 'Generate AI Commit Message' CodeLens in diff editors"
+        },
+        "kungCommit.prPromptTemplate": {
+          "type": "string",
+          "default": "Generate a pull request title and description for the code changes below.\n\nRules:\n1. The FIRST LINE must be the PR title only (max 72 characters).\n2. After a blank line, provide the PR description body using Markdown.\n3. Include these sections in the description:\n   - ## Summary \u2014 brief overview of what this PR does\n   - ## Changes \u2014 bullet list of key technical changes\n   - ## Breaking Changes \u2014 note if any, or \"None\"\n   - ## Related Issues \u2014 reference any related issues\n4. Be concise but thorough. Focus on the WHAT and WHY.\n5. Use present tense, imperative mood.\n\nBranch: {{baseBranch}} -> {{headBranch}}\n\nChanges:\n{{diff}}",
+          "markdownDescription": "Custom prompt template for PR description generation. Use `{{diff}}`, `{{baseBranch}}`, and `{{headBranch}}` as placeholders."
+        },
+        "kungCommit.autoOpenPRView": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Automatically open the GitHub PR creation view after copying the PR description to clipboard (requires `github.vscode-pull-request-github` extension)."
         }
       }
     }

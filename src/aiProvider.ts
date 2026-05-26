@@ -6,6 +6,8 @@ import { Config } from './config';
 
 export interface AIProvider {
     generateCommitMessage(diff: string): Promise<string>;
+    /** Generate a PR title and description from a branch diff. */
+    generatePRDescription(diff: string): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,10 @@ abstract class BaseProvider {
         this.config = config;
     }
 
+    // -----------------------------------------------------------------------
+    // Commit message prompts
+    // -----------------------------------------------------------------------
+
     protected buildUserPrompt(diff: string): string {
         const template = this.config.promptTemplate;
         return template.replace('{{diff}}', diff);
@@ -114,6 +120,45 @@ abstract class BaseProvider {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // PR description prompts
+    // -----------------------------------------------------------------------
+
+    /**
+     * Build the user prompt for PR description generation.
+     * Supports {{diff}}, {{baseBranch}}, {{headBranch}} placeholders.
+     */
+    protected buildPRUserPrompt(diff: string, baseBranch?: string, headBranch?: string): string {
+        const template = this.config.prPromptTemplate;
+        return template
+            .replace('{{diff}}', diff)
+            .replace('{{baseBranch}}', baseBranch || 'base')
+            .replace('{{headBranch}}', headBranch || 'HEAD');
+    }
+
+    protected buildPRSystemPrompt(): string {
+        const locale = this.config.locale;
+        const localeInstruction =
+            locale !== 'en'
+                ? `\nRespond in ${locale}.`
+                : '';
+
+        return (
+            `You are an expert developer reviewing a pull request.` +
+            localeInstruction +
+            `\n\n` +
+            `Generate a clear, structured PR title and description based on the git diff provided.` +
+            ` The first line of your response MUST be the PR title only (max 72 characters).` +
+            ` After a blank line, provide the full description body using Markdown.` +
+            ` Include sections for Summary, Changes, Breaking Changes, and Related Issues.` +
+            ` Focus on the WHAT and WHY, not the HOW.`
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared
+    // -----------------------------------------------------------------------
+
     protected getApiKey(): string {
         return this.config.apiKey || process.env.KUNG_COMMIT_API_KEY || '';
     }
@@ -126,7 +171,21 @@ abstract class BaseProvider {
         return withRetry(() => this.doGenerate(diff));
     }
 
+    /**
+     * Generate a PR title and description from a branch diff.
+     * Subclasses implement `doGeneratePR(diff): string`.
+     */
+    async generatePRDescription(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
+        return withRetry(() => this.doGeneratePR(diff, baseBranch, headBranch));
+    }
+
     protected abstract doGenerate(diff: string): Promise<string>;
+
+    /**
+     * Protected PR generation method — each provider overrides this to
+     * use its own API endpoint while leveraging PR-specific prompts.
+     */
+    protected abstract doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string>;
 
     /**
      * Helper to parse a JSON response from an OpenAI-compatible API.
@@ -185,6 +244,44 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
         const data = await response.json();
         return this.parseOpenAIResponse(data);
     }
+
+    protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
+        const apiKey = this.getApiKey();
+        if (!apiKey) {
+            throw Object.assign(new Error('OpenAI API key is not configured.'), { status: 401 });
+        }
+
+        const model = this.config.model || 'gpt-4o-mini';
+        const prompt = this.buildPRUserPrompt(diff, baseBranch, headBranch);
+        const systemPrompt = this.buildPRSystemPrompt();
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt },
+                ],
+                temperature: 0.3,
+                max_tokens: 1000,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            const err = new Error(`OpenAI API error (${response.status}): ${errorBody}`);
+            (err as any).status = response.status;
+            throw err;
+        }
+
+        const data = await response.json();
+        return this.parseOpenAIResponse(data);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +326,44 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
         const data = await response.json();
         return this.parseOpenAIResponse(data);
     }
+
+    protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
+        const apiKey = this.getApiKey();
+        if (!apiKey) {
+            throw Object.assign(new Error('DeepSeek API key is not configured.'), { status: 401 });
+        }
+
+        const model = this.config.model || 'deepseek-chat';
+        const prompt = this.buildPRUserPrompt(diff, baseBranch, headBranch);
+        const systemPrompt = this.buildPRSystemPrompt();
+
+        const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt },
+                ],
+                temperature: 0.3,
+                max_tokens: 1000,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            const err = new Error(`DeepSeek API error (${response.status}): ${errorBody}`);
+            (err as any).status = response.status;
+            throw err;
+        }
+
+        const data = await response.json();
+        return this.parseOpenAIResponse(data);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +391,42 @@ export class AnthropicProvider extends BaseProvider implements AIProvider {
             body: JSON.stringify({
                 model,
                 max_tokens: 300,
+                system: systemPrompt,
+                messages: [{ role: 'user', content: prompt }],
+            }),
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            const err = new Error(`Anthropic API error (${response.status}): ${errorBody}`);
+            (err as any).status = response.status;
+            throw err;
+        }
+
+        const data = await response.json();
+        return this.parseAnthropicResponse(data);
+    }
+
+    protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
+        const apiKey = this.getApiKey();
+        if (!apiKey) {
+            throw Object.assign(new Error('Anthropic API key is not configured.'), { status: 401 });
+        }
+
+        const model = this.config.model || 'claude-sonnet-4-20250514';
+        const prompt = this.buildPRUserPrompt(diff, baseBranch, headBranch);
+        const systemPrompt = this.buildPRSystemPrompt();
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+                model,
+                max_tokens: 1000,
                 system: systemPrompt,
                 messages: [{ role: 'user', content: prompt }],
             }),
@@ -318,6 +489,70 @@ export class CustomProvider extends BaseProvider implements AIProvider {
                 ],
                 temperature: 0.3,
                 max_tokens: 300,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            const err = new Error(`Custom API error (${response.status}): ${errorBody}`);
+            (err as any).status = response.status;
+            throw err;
+        }
+
+        const data = await response.json();
+
+        // Try OpenAI-like response first, then Anthropic-like fallback
+        const message =
+            this.parseOpenAIResponse(data) || this.parseAnthropicResponse(data) || '';
+
+        if (!message) {
+            throw new Error(
+                'Could not parse response from custom endpoint. Expected OpenAI or Anthropic format.',
+            );
+        }
+
+        return message;
+    }
+
+    protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
+        const endpoint = this.config.customEndpoint;
+        if (!endpoint) {
+            throw new Error(
+                'Custom endpoint is not configured. Set kungCommit.customEndpoint in settings.',
+            );
+        }
+
+        const apiKey = this.getApiKey();
+        const model = this.config.customModel || this.config.model || 'gpt-4o-mini';
+        const prompt = this.buildPRUserPrompt(diff, baseBranch, headBranch);
+        const systemPrompt = this.buildPRSystemPrompt();
+
+        const customHeaders = this.config.customHeaders || {};
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...customHeaders,
+        };
+
+        // Only add default Authorization if not already provided via customHeaders
+        const hasAuthHeader = Object.keys(customHeaders).some(
+            key => key.toLowerCase() === 'authorization'
+        );
+        if (!hasAuthHeader && apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt },
+                ],
+                temperature: 0.3,
+                max_tokens: 1000,
             }),
         });
 

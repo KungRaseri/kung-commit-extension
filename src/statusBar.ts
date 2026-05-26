@@ -19,6 +19,21 @@ export function showGenerating(): void {
 }
 
 /**
+ * Show the "Generating PR description" status bar message.
+ */
+export function showPRGenerating(): void {
+    if (!statusBarItem) {
+        statusBarItem = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Left,
+            100,
+        );
+    }
+    statusBarItem.text = '$(sync~spin) Kung Commit: Generating PR description...';
+    statusBarItem.tooltip = 'Generating PR title and description with AI';
+    statusBarItem.show();
+}
+
+/**
  * Hide the status bar item.
  */
 export function hideStatus(): void {

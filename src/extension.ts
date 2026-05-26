@@ -1,13 +1,33 @@
 import * as vscode from 'vscode';
 import { getConfig } from './config';
-import { getDiff } from './gitDiff';
+import { getDiff, getBranchDiff } from './gitDiff';
 import { createProvider } from './aiProvider';
-import { showGenerating, hideStatus, disposeStatusBar } from './statusBar';
+import { showGenerating, showPRGenerating, hideStatus, disposeStatusBar } from './statusBar';
 import { registerCommitLens } from './commitLens';
 import { GitExtension } from './gitExtensionTypes';
 
 // ---------------------------------------------------------------------------
-// Command Handler
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function getGitRepository() {
+    const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
+    if (!gitExt) {
+        throw new Error('Git extension not found.');
+    }
+    if (!gitExt.isActive) {
+        await gitExt.activate();
+    }
+    const api = gitExt.exports.getAPI(1);
+    const repository = api.repositories[0];
+    if (!repository) {
+        throw new Error('No Git repository found.');
+    }
+    return repository;
+}
+
+// ---------------------------------------------------------------------------
+// Command Handler: Generate Commit Message
 // ---------------------------------------------------------------------------
 
 async function handleGenerateCommitMessage(): Promise<void> {
@@ -48,7 +68,8 @@ async function handleGenerateCommitMessage(): Promise<void> {
         }
 
         // 3. Inject the generated message directly into the SCM input box
-        await setScmInputBoxValue(message);
+        const repository = await getGitRepository();
+        repository.inputBox.value = message;
     } catch (error: any) {
         const msg = error.message || 'Unknown error';
 
@@ -93,28 +114,128 @@ async function handleGenerateCommitMessage(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// SCM Input Box Integration
+// Command Handler: Generate PR Description
 // ---------------------------------------------------------------------------
 
-async function setScmInputBoxValue(message: string): Promise<void> {
-    const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
-    if (!gitExt) {
-        throw new Error('Git extension not found.');
+/**
+ * Parse the AI response into PR title and description.
+ * First line is the title, everything after is the description body.
+ */
+function parsePRResult(raw: string): { title: string; description: string } {
+    const trimmed = raw.trim();
+    const firstNewline = trimmed.indexOf('\n');
+
+    if (firstNewline === -1) {
+        return { title: trimmed, description: '' };
     }
 
-    if (!gitExt.isActive) {
-        await gitExt.activate();
+    return {
+        title: trimmed.substring(0, firstNewline).trim(),
+        description: trimmed.substring(firstNewline + 1).trim(),
+    };
+}
+
+async function handleGeneratePRDescription(): Promise<void> {
+    const config = getConfig();
+
+    // Validate API key
+    const apiKey = config.apiKey || '';
+    if (!apiKey) {
+        const selection = await vscode.window.showErrorMessage(
+            'Kung Commit: API key not configured. Set the "kungCommit.apiKey" setting or the KUNG_COMMIT_API_KEY environment variable.',
+            'Open Settings',
+        );
+        if (selection === 'Open Settings') {
+            vscode.commands.executeCommand(
+                'workbench.action.openSettings',
+                'kungCommit.apiKey',
+            );
+        }
+        return;
     }
 
-    const api = gitExt.exports.getAPI(1);
-    const repository = api.repositories[0];
+    // Show progress in the status bar
+    showPRGenerating();
 
-    if (!repository) {
-        throw new Error('No Git repository found.');
+    try {
+        // 1. Detect base branch and get branch diff
+        const { diff, baseBranch, headBranch } = await getBranchDiff();
+
+        // 2. Create the AI provider and generate PR description
+        const provider = createProvider(config);
+        const result = await provider.generatePRDescription(diff, baseBranch, headBranch);
+
+        if (!result) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: The AI provider returned an empty PR description.',
+            );
+            return;
+        }
+
+        // 3. Parse result into title and description
+        const { title, description } = parsePRResult(result);
+
+        // 4. Format for clipboard
+        const prText = `${title}\n\n${description}`.trim();
+
+        // 5. Copy to clipboard
+        await vscode.env.clipboard.writeText(prText);
+
+        // 6. Show success notification with optional "Open PR View" action
+        const action = await vscode.window.showInformationMessage(
+            `Kung Commit: PR description copied to clipboard!`,
+            ...(config.autoOpenPRView ? [] : ['Open PR View']),
+        );
+
+        if (action === 'Open PR View') {
+            vscode.commands.executeCommand('pr:create');
+        } else if (config.autoOpenPRView) {
+            vscode.commands.executeCommand('pr:create');
+        }
+    } catch (error: any) {
+        const msg = error.message || 'Unknown error';
+
+        if (msg.includes('No Git repository found')) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: No Git repository found in the current workspace.',
+            );
+        } else if (msg.includes('API key is not configured')) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: API key is not configured. Check your settings.',
+            );
+        } else if (msg.includes('Could not determine the base branch')) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: Could not determine the base branch. Make sure you are on a feature branch with a main/master branch.',
+            );
+        } else if (msg.includes('No differences found')) {
+            vscode.window.showInformationMessage(
+                `Kung Commit: No differences found between the base branch and current branch.`,
+            );
+        } else if (error.status === 401 || error.status === 403) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: Authentication failed. Check your API key.',
+            );
+        } else if (error.status === 429) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: Rate limited. Please wait and try again.',
+            );
+        } else if (error.status && error.status >= 500) {
+            vscode.window.showErrorMessage(
+                `Kung Commit: AI provider server error (${error.status}). Please try again later.`,
+            );
+        } else if (
+            error.name === 'TypeError' &&
+            String(msg).includes('fetch')
+        ) {
+            vscode.window.showErrorMessage(
+                'Kung Commit: Network error. Check your internet connection and API endpoint.',
+            );
+        } else {
+            vscode.window.showErrorMessage(`Kung Commit: ${msg}`);
+        }
+    } finally {
+        hideStatus();
     }
-
-    // Set the message directly into the SCM input box without prompting
-    repository.inputBox.value = message;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,21 +245,30 @@ async function setScmInputBoxValue(message: string): Promise<void> {
 export function activate(context: vscode.ExtensionContext): void {
     console.log('Kung Commit extension activating...');
 
-    // 1. Register the main command
-    const commandDisposable = vscode.commands.registerCommand(
-        'kungCommit.generateMessage',
-        handleGenerateCommitMessage,
+    // 1. Register the commit message generation command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'kungCommit.generateMessage',
+            handleGenerateCommitMessage,
+        ),
     );
-    context.subscriptions.push(commandDisposable);
 
-    // 2. Register CodeLens provider if enabled
+    // 2. Register the PR description generation command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'kungCommit.generatePRDescription',
+            handleGeneratePRDescription,
+        ),
+    );
+
+    // 3. Register CodeLens provider if enabled
     const config = getConfig();
     if (config.showCodeLens) {
         const codeLensDisposable = registerCommitLens();
         context.subscriptions.push(codeLensDisposable);
     }
 
-    // 3. Listen for configuration changes
+    // 4. Listen for configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('kungCommit.showCodeLens')) {
@@ -150,7 +280,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
     );
 
-    // 4. Clean up status bar on deactivation
+    // 5. Clean up status bar on deactivation
     context.subscriptions.push({ dispose: disposeStatusBar });
 
     console.log('Kung Commit extension activated successfully.');
