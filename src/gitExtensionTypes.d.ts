@@ -60,6 +60,16 @@ export interface GitAPI {
     repositories: Repository[];
     /** Get a repository for a given URI. */
     getRepository(uri: vscode.Uri): Repository | undefined;
+    /** Git executable information. */
+    git: GitExecution;
+}
+
+/** Information about the Git executable used by the extension. */
+export interface GitExecution {
+    /** The filesystem path to the Git binary (e.g., "C:\\Program Files\\Git\\bin\\git.exe"). */
+    path: string;
+    /** The Git version string. */
+    version: string;
 }
 
 export interface GitExtension {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GitExtension, Repository } from './gitExtensionTypes';
+import { GitExtension, Repository, GitAPI } from './gitExtensionTypes';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -8,9 +8,43 @@ import { promisify } from 'util';
 // ---------------------------------------------------------------------------
 
 /**
- * Get the active Git repository from the built-in vscode.git extension.
+ * Resolve the "active" Git repository — the one that contains the currently
+ * open file in the editor. This is critical in multi-root workspaces or when
+ * VS Code has multiple Git repos open: the user expects the extension to act
+ * on the repo they're currently editing, not the first one in the list.
+ *
+ * Resolution strategy (in order):
+ *   1. Use `api.getRepository(uri)` with the active editor's document URI.
+ *   2. If no editor is open or the file isn't inside a Git repo, fall back
+ *      to the first repository (`api.repositories[0]`).
+ *
+ * @throws Error if no Git extension or no repository is found.
  */
-export async function getRepository(): Promise<Repository> {
+function getActiveRepository(api: GitAPI): Repository {
+    // Strategy 1: active editor's document belongs to a repository
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && !activeEditor.document.isUntitled) {
+        const docUri = activeEditor.document.uri;
+        const repoFromEditor = api.getRepository(docUri);
+        if (repoFromEditor) {
+            return repoFromEditor;
+        }
+    }
+
+    // Strategy 2: first repository (fallback)
+    const firstRepo = api.repositories[0];
+    if (!firstRepo) {
+        throw new Error('No Git repository found in the current workspace.');
+    }
+    return firstRepo;
+}
+
+/**
+ * Get the active Git extension API handle and the resolved repository.
+ * Logs diagnostic info so the user can see which repo/branch the extension
+ * is targeting (visible in Developer Tools console).
+ */
+function getGitExtension(): { api: GitAPI; repository: Repository } {
     const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
 
     if (!gitExt) {
@@ -18,17 +52,26 @@ export async function getRepository(): Promise<Repository> {
     }
 
     if (!gitExt.isActive) {
-        await gitExt.activate();
+        gitExt.activate();
     }
 
     const api = gitExt.exports.getAPI(1);
-    const repository = api.repositories[0];
+    const repository = getActiveRepository(api);
 
-    if (!repository) {
-        throw new Error('No Git repository found in the current workspace.');
-    }
+    const rootPath = repository.rootUri.fsPath;
+    const branchName = repository.state.HEAD?.name || '(detached HEAD)';
+    const gitPath = api.git.path;
+    console.log(`Kung Commit: repo = ${rootPath}, branch = ${branchName}, git = ${gitPath}`);
 
-    return repository;
+    return { api, repository };
+}
+
+/**
+ * Get the active Git repository (legacy export — used by extension.ts for
+ * inserting messages into the SCM input box).
+ */
+export async function getRepository(): Promise<Repository> {
+    return getGitExtension().repository;
 }
 
 /**
@@ -50,8 +93,7 @@ function truncateDiff(diff: string, maxChars: number): string {
 
 /**
  * Check whether changes exist in the repository by inspecting the
- * repository state properties (more reliable than relying solely on
- * `diff()` output, which can be affected by stale internal state).
+ * repository state properties. Used as a heuristic only — not a gate.
  */
 function hasChanges(repository: Repository): boolean {
     return (
@@ -64,9 +106,6 @@ function hasChanges(repository: Repository): boolean {
 
 /**
  * Force-refresh the repository state by calling `status()`.
- * This ensures the git extension's internal model is in sync
- * with the actual file system and git index before we attempt
- * to retrieve diffs.
  */
 async function refreshRepository(repository: Repository): Promise<void> {
     try {
@@ -78,39 +117,40 @@ async function refreshRepository(repository: Repository): Promise<void> {
 }
 
 /**
- * Attempt to retrieve a diff, with optional retry after refreshing
- * the repository state. Returns the diff string, or `undefined` if
- * no diff could be obtained.
+ * Attempt to retrieve a diff via the Git extension API, with optional retry
+ * after refreshing the repository state. Returns the diff string, or
+ * `undefined` if no diff could be obtained.
  */
 async function tryGetDiff(
     repository: Repository,
     staged: boolean,
     attempt: number = 1,
 ): Promise<string | undefined> {
+    const label = staged ? 'staged' : 'unstaged';
+
     for (let i = 0; i < attempt; i++) {
         if (i > 0) {
-            // On retry, refresh the repository state first
             await refreshRepository(repository);
         }
 
         try {
             const diff = await repository.diff(staged);
             if (diff.trim().length > 0) {
+                console.log(`Kung Commit: Git API returned ${label} diff (${diff.length} chars)`);
                 return diff;
             }
-        } catch {
-            // diff() may throw if the repository state is inconsistent;
-            // continue to retry if we have attempts left.
+        } catch (error: any) {
+            console.warn(`Kung Commit: repository.diff(${staged}) threw (attempt ${i + 1}/${attempt}): ${error.message || error}`);
         }
     }
 
+    console.warn(`Kung Commit: Git API ${label} diff empty after ${attempt} attempt(s)`);
     return undefined;
 }
 
 /**
  * Build a combined diff header that describes which sections are staged
- * vs. unstaged, making it clear to the AI what is already in the index
- * and what is still in the working tree.
+ * vs. unstaged.
  */
 function buildCombinedDiff(stagedDiff: string, unstagedDiff: string): string {
     const parts: string[] = [];
@@ -127,126 +167,128 @@ function buildCombinedDiff(stagedDiff: string, unstagedDiff: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback: direct `git diff` via terminal
+// Shell-based fallbacks using the Git extension's own Git binary
 // ---------------------------------------------------------------------------
-
-/**
- * Execute a git command directly in the repository root using the shell.
- * This serves as a last-resort fallback when the VS Code Git extension API
- * fails to return changes that we know exist.
- */
-async function fallbackGitDiff(repository: Repository, staged: boolean): Promise<string> {
-    const cwd = repository.rootUri.fsPath;
-    const args = staged
-        ? ['diff', '--cached', '--no-color']
-        : ['diff', '--no-color'];
-
-    try {
-        const { stdout, stderr } = await executeGitCommand(cwd, args);
-
-        if (stderr && stderr.trim()) {
-            console.warn(`Kung Commit: fallback git diff stderr: ${stderr}`);
-        }
-
-        return stdout || '';
-    } catch (error: any) {
-        console.warn(`Kung Commit: fallback git diff failed: ${error.message || error}`);
-        return '';
-    }
-}
-
-/**
- * Run `git status --porcelain` as an ultimate fallback to detect changes
- * that `git diff` cannot see (e.g., untracked/new files).
- *
- * Because untracked files have no diff content, we build a structured
- * summary describing what was added.
- *
- * Returns a human-readable diff-like string, or an empty string if the
- * status shows no changes.
- */
-async function fallbackGitStatus(repository: Repository): Promise<string> {
-    const cwd = repository.rootUri.fsPath;
-
-    try {
-        const { stdout } = await executeGitCommand(cwd, ['status', '--porcelain']);
-
-        if (!stdout || !stdout.trim()) {
-            return '';
-        }
-
-        const lines = stdout.trim().split('\n');
-        const staged: string[] = [];
-        const unstaged: string[] = [];
-        const untracked: string[] = [];
-        const conflicted: string[] = [];
-
-        for (const line of lines) {
-            const xy = line.substring(0, 2).trim();
-            const file = line.substring(3).trim();
-
-            if (line.startsWith('??')) {
-                untracked.push(file);
-            } else if (xy.includes('U') || xy === 'DD' || xy === 'AA') {
-                conflicted.push(`${xy} ${file}`);
-            } else if (line[0] !== ' ' && line[0] !== '?') {
-                // First character non-blank → staged
-                staged.push(`${line[0]} ${file}`);
-            } else if (line[1] !== ' ' && line[1] !== '?') {
-                // Second character non-blank → unstaged
-                unstaged.push(`${line[1]} ${file}`);
-            }
-        }
-
-        const parts: string[] = [];
-
-        if (staged.length > 0) {
-            parts.push('=== STAGED CHANGES (index) ===\n' + staged.join('\n'));
-        }
-        if (unstaged.length > 0) {
-            parts.push('=== UNSTAGED CHANGES (working tree) ===\n' + unstaged.join('\n'));
-        }
-        if (untracked.length > 0) {
-            parts.push('=== UNTRACKED FILES ===\n' + untracked.map(f => `A ${f}`).join('\n'));
-        }
-        if (conflicted.length > 0) {
-            parts.push('=== CONFLICTED FILES ===\n' + conflicted.join('\n'));
-        }
-
-        // Prepend a note explaining this came from `git status` rather than
-        // a real diff, so the AI knows it's a list of files, not a patch.
-        const header =
-            'NOTE: This is a file-status summary (not a full patch) because ' +
-            'the changes include untracked files or the diff could not be retrieved.\n\n';
-
-        return header + parts.join('\n\n');
-    } catch (error: any) {
-        console.warn(`Kung Commit: fallback git status failed: ${error.message || error}`);
-        return '';
-    }
-}
 
 const execAsync = promisify(exec);
 
 /**
- * Run a raw git command and return its output.
+ * Run a raw git command using the exact Git binary that the VS Code Git
+ * extension has discovered. On Windows, the bundled Git for Windows is
+ * often NOT on the system PATH, so using `git` bare would fail silently.
+ * Using the extension's discovered path guarantees it works wherever the
+ * Git extension itself works.
  */
-async function executeGitCommand(
+async function runGit(
+    gitPath: string,
     cwd: string,
     args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
-    const command = `git ${args.join(' ')}`;
+    // Quote the git path to handle spaces (e.g., "Program Files")
+    const command = `"${gitPath}" ${args.join(' ')}`;
 
     try {
-        const { stdout, stderr } = await execAsync(command, { cwd, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+        const { stdout, stderr } = await execAsync(command, {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            windowsHide: true,
+        });
         return { stdout, stderr };
     } catch (error: any) {
-        // exec throws on non-zero exit; the diff may still be in stdout
+        // exec throws on non-zero exit; stdout/stderr may still be populated
         return {
             stdout: error.stdout || '',
             stderr: error.stderr || error.message || '',
         };
     }
+}
+
+/**
+ * Execute `git diff` via the shell, returning the diff output.
+ */
+async function shellGitDiff(
+    gitPath: string,
+    cwd: string,
+    staged: boolean,
+): Promise<string> {
+    const args = staged
+        ? ['diff', '--cached', '--no-color']
+        : ['diff', '--no-color'];
+
+    const { stdout, stderr } = await runGit(gitPath, cwd, args);
+
+    if (stderr && stderr.trim()) {
+        console.warn(`Kung Commit: shell git diff (staged=${staged}) stderr: ${stderr}`);
+    }
+
+    return stdout || '';
+}
+
+/**
+ * Run `git status --porcelain` via the shell and return a structured
+ * human-readable summary of all changes (including untracked files).
+ */
+async function shellGitStatus(gitPath: string, cwd: string): Promise<string> {
+    const { stdout } = await runGit(gitPath, cwd, ['status', '--porcelain']);
+
+    if (!stdout || !stdout.trim()) {
+        return '';
+    }
+
+    const lines = stdout.trim().split('\n');
+    const staged: string[] = [];
+    const unstaged: string[] = [];
+    const untracked: string[] = [];
+    const conflicted: string[] = [];
+
+    for (const line of lines) {
+        if (line.startsWith('??')) {
+            untracked.push(line.substring(3).trim());
+            continue;
+        }
+
+        const statusChar1 = line[0];
+        const statusChar2 = line[1];
+        const file = line.substring(3).trim();
+
+        // Check for conflicted (U in any position, or DD/AA)
+        if (statusChar1 === 'U' || statusChar2 === 'U' ||
+            (statusChar1 === 'D' && statusChar2 === 'D') ||
+            (statusChar1 === 'A' && statusChar2 === 'A')) {
+            conflicted.push(`${statusChar1}${statusChar2} ${file}`);
+            continue;
+        }
+
+        if (statusChar1 !== ' ' && statusChar1 !== '?') {
+            staged.push(`${statusChar1} ${file}`);
+        }
+
+        if (statusChar2 !== ' ' && statusChar2 !== '?') {
+            unstaged.push(`${statusChar2} ${file}`);
+        }
+    }
+
+    const parts: string[] = [];
+
+    if (staged.length > 0) {
+        parts.push('=== STAGED CHANGES (index) ===\n' + staged.join('\n'));
+    }
+    if (unstaged.length > 0) {
+        parts.push('=== UNSTAGED CHANGES (working tree) ===\n' + unstaged.join('\n'));
+    }
+    if (untracked.length > 0) {
+        parts.push('=== UNTRACKED FILES ===\n' + untracked.map(f => `A ${f}`).join('\n'));
+    }
+    if (conflicted.length > 0) {
+        parts.push('=== CONFLICTED FILES ===\n' + conflicted.join('\n'));
+    }
+
+    const header =
+        'NOTE: This is a file-status summary (not a full patch) because ' +
+        'the changes include untracked files or the diff could not be retrieved.\n\n';
+
+    return header + parts.join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -256,88 +298,68 @@ async function executeGitCommand(
 /**
  * Extract the git diff from the current workspace repository.
  *
- * Detection strategy (in order):
- * 1. Check `repository.state` properties to see if changes exist at all.
- * 2. If the state indicates changes but `diff()` returns empty, refresh the
- *    repository via `status()` and retry.
- * 3. Combine staged AND unstaged diffs when both contain content, so the AI
- *    has the full picture.
- * 4. If the API still comes up empty despite the state showing changes, fall
- *    back to running `git diff` directly via the shell.
+ * Strategy (three phases):
+ *   1. Git extension API  — `repository.diff()` (fast, no subprocess)
+ *   2. Shell `git diff`   — using the Git extension's discovered binary path
+ *   3. `git status`       — catches untracked files that `git diff` ignores
  *
- * Returns the diff content as a string.
+ * If ALL phases return nothing, throws "No changes detected".
  */
 export async function getDiff(): Promise<string> {
-    const repository = await getRepository();
-
-    // --- Ensure repository state is fresh ---
-    // This is critical: the state arrays (workingTreeChanges, indexChanges, etc.)
-    // may not be populated immediately on activation. A status() refresh forces
-    // the Git extension to re-index the working tree and index.
-    await refreshRepository(repository);
-
-    // --- Attempt to retrieve diffs ---
+    const { api, repository } = getGitExtension();
+    const rootPath = repository.rootUri.fsPath;
+    const gitPath = api.git.path;
     const maxDiffChars = getMaxDiffChars();
 
-    // Try staged diff (with retry + refresh on retry)
-    let stagedDiff = await tryGetDiff(repository, true, 2);
+    // --- Phase 1: Git extension API ---
+    // Always refresh first so the internal state is current.
+    await refreshRepository(repository);
 
-    // Try unstaged diff (with retry + refresh on retry)
+    console.log('Kung Commit: Phase 1 — Git extension API diff()...');
+    let stagedDiff = await tryGetDiff(repository, true, 2);
     let unstagedDiff = await tryGetDiff(repository, false, 2);
 
-    // --- Fallback: use hasChanges() to decide if we should try harder ---
-    // If both API diffs came back empty but the repository state (after refresh)
-    // says there ARE changes, the Git extension API's diff() may be stale.
-    // Fall back to direct `git diff` via shell.
-    const stateShowsChanges = hasChanges(repository);
-
+    // --- Phase 2: Shell git diff using extension's Git binary ---
     if (!stagedDiff && !unstagedDiff) {
-        if (stateShowsChanges) {
-            console.warn(
-                'Kung Commit: Git extension API returned empty diffs despite ' +
-                'state indicating changes. Falling back to direct `git diff`.',
-            );
-        }
+        console.log(`Kung Commit: Phase 2 — shell \`"${gitPath}" diff\`...`);
+        stagedDiff = await shellGitDiff(gitPath, rootPath, true);
+        unstagedDiff = await shellGitDiff(gitPath, rootPath, false);
 
-        stagedDiff = await fallbackGitDiff(repository, true);
-        unstagedDiff = await fallbackGitDiff(repository, false);
+        if (stagedDiff) console.log(`Kung Commit: shell got staged diff (${stagedDiff.length} chars)`);
+        if (unstagedDiff) console.log(`Kung Commit: shell got unstaged diff (${unstagedDiff.length} chars)`);
     }
 
-    // --- Ultimate fallback: git status --porcelain ---
-    // This catches scenarios where changes exist but produce no diff output,
-    // most commonly untracked (new) files that haven't been staged yet.
-    // `git diff` cannot show untracked files - only `git status` can detect them.
+    // --- Phase 3: git status --porcelain (catches untracked files) ---
     if (!stagedDiff && !unstagedDiff) {
-        console.warn(
-            'Kung Commit: `git diff` also returned empty. Trying `git status --porcelain` ' +
-            'as an ultimate fallback for untracked/new files.',
-        );
-
-        const statusOutput = await fallbackGitStatus(repository);
+        console.log(`Kung Commit: Phase 3 — shell \`"${gitPath}" status --porcelain\`...`);
+        const statusOutput = await shellGitStatus(gitPath, rootPath);
         if (statusOutput) {
+            console.log(`Kung Commit: git status found changes (${statusOutput.length} chars)`);
             return truncateDiff(statusOutput, maxDiffChars);
         }
+        console.warn('Kung Commit: All three phases returned empty.');
     }
 
     // --- Build the final diff ---
     let diff: string;
 
     if (stagedDiff && unstagedDiff) {
-        // Both staged and unstaged changes exist: combine them
         diff = buildCombinedDiff(stagedDiff, unstagedDiff);
     } else if (stagedDiff) {
         diff = stagedDiff;
     } else if (unstagedDiff) {
         diff = unstagedDiff;
     } else {
+        console.error('Kung Commit: No diff could be obtained from any source.');
         throw new Error('No changes detected in the repository. Stage or modify files first.');
     }
 
+    console.log(`Kung Commit: final diff = ${diff.length} chars`);
     return truncateDiff(diff, maxDiffChars);
 }
 
 // ---------------------------------------------------------------------------
-// NEW: Branch diff for PR description generation
+// Branch diff for PR description generation
 // ---------------------------------------------------------------------------
 
 /**
@@ -358,9 +380,6 @@ const BASE_BRANCH_CANDIDATES = [
  * 1. Upstream tracking branch of the current HEAD
  * 2. Common branch names: main, master, origin/main, origin/master
  *
- * Each candidate is validated by calling `repository.diffBetween(candidate, 'HEAD')`.
- * The first candidate that resolves without error is used.
- *
  * @throws Error if no base branch can be determined.
  */
 export async function detectBaseBranch(repository: Repository): Promise<string> {
@@ -369,11 +388,9 @@ export async function detectBaseBranch(repository: Repository): Promise<string> 
     // If we have an upstream tracking branch, try it first
     if (head?.name && repository.state.upstream?.name) {
         const upstream = repository.state.upstream.name;
-        // upstream returns e.g. "refs/remotes/origin/main" — extract the short name
         const shortUpstream = upstream.replace(/^refs\/remotes\//, '');
         try {
             const testDiff = await repository.diffBetween(shortUpstream, 'HEAD');
-            // If we get here, the ref exists (even if diff is empty)
             if (testDiff !== undefined) {
                 return shortUpstream;
             }
