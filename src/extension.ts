@@ -1,41 +1,23 @@
 import * as vscode from 'vscode';
 import { getConfig } from './config';
-import { getDiff, getBranchDiff } from './gitDiff';
+import { getDiff, getBranchDiff, getRepository as getGitRepository } from './gitDiff';
 import { createProvider } from './aiProvider';
 import { showGenerating, showPRGenerating, hideStatus, disposeStatusBar } from './statusBar';
 import { registerCommitLens } from './commitLens';
-import { GitExtension } from './gitExtensionTypes';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function getGitRepository() {
-    const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
-    if (!gitExt) {
-        throw new Error('Git extension not found.');
-    }
-    if (!gitExt.isActive) {
-        await gitExt.activate();
-    }
-    const api = gitExt.exports.getAPI(1);
-    const repository = api.repositories[0];
-    if (!repository) {
-        throw new Error('No Git repository found.');
-    }
-    return repository;
-}
 
 // ---------------------------------------------------------------------------
 // Command Handler: Generate Commit Message
 // ---------------------------------------------------------------------------
 
 async function handleGenerateCommitMessage(): Promise<void> {
+    console.log('Kung Commit: handleGenerateCommitMessage started');
     const config = getConfig();
+    console.log('Kung Commit: provider =', config.provider, 'model =', config.model);
 
     // Validate API key
     const apiKey = config.apiKey || '';
     if (!apiKey) {
+        console.warn('Kung Commit: API key not configured');
         const selection = await vscode.window.showErrorMessage(
             'Kung Commit: API key not configured. Set the "kungCommit.apiKey" setting or the KUNG_COMMIT_API_KEY environment variable.',
             'Open Settings',
@@ -48,17 +30,23 @@ async function handleGenerateCommitMessage(): Promise<void> {
         }
         return;
     }
+    console.log('Kung Commit: API key present');
 
     // Show progress in the status bar
     showGenerating();
 
     try {
         // 1. Extract diff from the Git repository
+        console.log('Kung Commit: calling getDiff()...');
         const diff = await getDiff();
+        console.log(`Kung Commit: getDiff() returned ${diff.length} chars`);
 
         // 2. Create the AI provider and generate a commit message
+        console.log('Kung Commit: creating provider...');
         const provider = createProvider(config);
+        console.log('Kung Commit: provider created, calling generateCommitMessage...');
         const message = await provider.generateCommitMessage(diff);
+        console.log(`Kung Commit: generateCommitMessage returned ${message ? message.length + ' chars' : 'null'}`);
 
         if (!message) {
             vscode.window.showErrorMessage(
@@ -68,33 +56,42 @@ async function handleGenerateCommitMessage(): Promise<void> {
         }
 
         // 3. Inject the generated message directly into the SCM input box
+        console.log('Kung Commit: getting repository for SCM input box...');
         const repository = await getGitRepository();
         repository.inputBox.value = message;
+        console.log('Kung Commit: message injected into SCM input box');
     } catch (error: any) {
         const msg = error.message || 'Unknown error';
+        console.error(`Kung Commit: CAUGHT ERROR — name=${error.name}, status=${error.status}, msg="${msg}"`);
 
         // Show non-error notifications for expected scenarios
         if (msg.includes('No changes detected')) {
+            console.warn('Kung Commit: matched "No changes detected" handler');
             vscode.window.showInformationMessage(
                 'Kung Commit: No changes detected. Stage or modify files first.',
             );
         } else if (msg.includes('No Git repository found')) {
+            console.warn('Kung Commit: matched "No Git repository found" handler');
             vscode.window.showErrorMessage(
                 'Kung Commit: No Git repository found in the current workspace.',
             );
         } else if (msg.includes('API key is not configured')) {
+            console.warn('Kung Commit: matched "API key is not configured" handler');
             vscode.window.showErrorMessage(
                 'Kung Commit: API key is not configured. Check your settings.',
             );
         } else if (error.status === 401 || error.status === 403) {
+            console.warn('Kung Commit: matched 401/403 handler');
             vscode.window.showErrorMessage(
                 'Kung Commit: Authentication failed. Check your API key.',
             );
         } else if (error.status === 429) {
+            console.warn('Kung Commit: matched 429 handler');
             vscode.window.showErrorMessage(
                 'Kung Commit: Rate limited. Please wait and try again.',
             );
         } else if (error.status && error.status >= 500) {
+            console.warn('Kung Commit: matched 5xx handler');
             vscode.window.showErrorMessage(
                 `Kung Commit: AI provider server error (${error.status}). Please try again later.`,
             );
@@ -102,13 +99,16 @@ async function handleGenerateCommitMessage(): Promise<void> {
             error.name === 'TypeError' &&
             String(msg).includes('fetch')
         ) {
+            console.warn('Kung Commit: matched network error handler');
             vscode.window.showErrorMessage(
                 'Kung Commit: Network error. Check your internet connection and API endpoint.',
             );
         } else {
+            console.warn(`Kung Commit: no specific handler matched — showing generic error`);
             vscode.window.showErrorMessage(`Kung Commit: ${msg}`);
         }
     } finally {
+        console.log('Kung Commit: handleGenerateCommitMessage finished (finally block)');
         hideStatus();
     }
 }
