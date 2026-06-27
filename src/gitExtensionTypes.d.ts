@@ -14,6 +14,15 @@ export interface Branch {
     type: number;
 }
 
+export interface GitChange {
+    /** The URI of the file that changed */
+    uri: vscode.Uri;
+    /** Original file URI (for renames) */
+    originalUri: vscode.Uri | undefined;
+    /** Status string: 'M' modified, 'A' added, 'D' deleted, 'R' renamed, etc. */
+    status: string;
+}
+
 export interface RepositoryState {
     /** Current HEAD branch (undefined if detached HEAD) */
     HEAD: Branch | undefined;
@@ -21,6 +30,14 @@ export interface RepositoryState {
     refs: Branch[];
     /** Upstream tracking branch, if any */
     upstream: Branch | undefined;
+    /** Changes in the working tree (unstaged modifications to tracked files) */
+    workingTreeChanges: GitChange[];
+    /** Changes staged in the index */
+    indexChanges: GitChange[];
+    /** Merge changes (conflicted files) */
+    mergeChanges: GitChange[];
+    /** Untracked files (new files not yet added to the index) */
+    untrackedChanges: GitChange[];
 }
 
 export interface Repository {
@@ -30,10 +47,12 @@ export interface Repository {
     rootUri: vscode.Uri;
     /** The SCM input box for commit messages. */
     inputBox: vscode.SourceControlInputBox;
-    /** Repository state including current branch and refs. */
+    /** Repository state including current branch, refs, and tracked changes. */
     state: RepositoryState;
     /** Get diff between two arbitrary refs (branches, tags, commits). */
     diffBetween(base: string, head: string): Promise<string>;
+    /** Refresh the repository state (re-index working tree and index). */
+    status(): Promise<void>;
 }
 
 export interface GitAPI {

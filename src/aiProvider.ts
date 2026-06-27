@@ -7,7 +7,7 @@ import { Config } from './config';
 export interface AIProvider {
     generateCommitMessage(diff: string): Promise<string>;
     /** Generate a PR title and description from a branch diff. */
-    generatePRDescription(diff: string): Promise<string>;
+    generatePRDescription(diff: string, baseBranch?: string, headBranch?: string): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
