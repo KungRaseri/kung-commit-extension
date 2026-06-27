@@ -2,7 +2,7 @@
   "name": "kung-commit",
   "displayName": "Kung Commit",
   "description": "Generate conventional commit messages from your git changes using AI",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "publisher": "kung-commit",
   "license": "MIT",
   "engines": {
@@ -44,6 +44,18 @@
     ],
     "menus": {
       "scm/title": [
+        {
+          "command": "kungCommit.generateMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        },
+        {
+          "command": "kungCommit.generatePRDescription",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ],
+      "scm/sourceControl/title": [
         {
           "command": "kungCommit.generateMessage",
           "group": "navigation",

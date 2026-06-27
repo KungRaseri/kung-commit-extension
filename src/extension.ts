@@ -245,7 +245,7 @@ async function handleGeneratePRDescription(): Promise<void> {
 export function activate(context: vscode.ExtensionContext): void {
     console.log('Kung Commit extension activating...');
 
-    // 1. Register the commit message generation command
+    // 1. Register the commit message generation command (SCM title bar & per-repo header)
     context.subscriptions.push(
         vscode.commands.registerCommand(
             'kungCommit.generateMessage',

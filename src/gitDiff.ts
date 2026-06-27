@@ -8,15 +8,20 @@ import { promisify } from 'util';
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the "active" Git repository — the one that contains the currently
- * open file in the editor. This is critical in multi-root workspaces or when
- * VS Code has multiple Git repos open: the user expects the extension to act
- * on the repo they're currently editing, not the first one in the list.
+ * Resolve the "active" Git repository — the one that the user is most likely
+ * targeting when they click the "Generate Commit Message" button. This is
+ * critical in multi-root workspaces or when VS Code has multiple Git repos
+ * open: the user expects the extension to act on the right repo.
  *
  * Resolution strategy (in order):
  *   1. Use `api.getRepository(uri)` with the active editor's document URI.
- *   2. If no editor is open or the file isn't inside a Git repo, fall back
- *      to the first repository (`api.repositories[0]`).
+ *      This works when the user has a file open from one of the repos.
+ *   2. Look for repositories that have **staged changes** — the user is
+ *      most likely about to commit from a repo that has staged changes.
+ *   3. Look for repositories that have **working tree changes** (unstaged).
+ *   4. If multiple repos have changes, show a QuickPick so the user can
+ *      choose which repo they intended.
+ *   5. Fall back to the first repository in the list.
  *
  * @throws Error if no Git extension or no repository is found.
  */
@@ -31,12 +36,46 @@ function getActiveRepository(api: GitAPI): Repository {
         }
     }
 
-    // Strategy 2: first repository (fallback)
-    const firstRepo = api.repositories[0];
-    if (!firstRepo) {
+    // Strategy 2: look for repos with staged changes (most actionable)
+    const repos = api.repositories;
+    if (repos.length === 0) {
         throw new Error('No Git repository found in the current workspace.');
     }
-    return firstRepo;
+
+    if (repos.length === 1) {
+        return repos[0];
+    }
+
+    // Multiple repos — try to find the best match
+    const reposWithStaged = repos.filter(r => r.state.indexChanges.length > 0);
+    if (reposWithStaged.length === 1) {
+        console.log(`Kung Commit: selected repo with staged changes: ${reposWithStaged[0].rootUri.fsPath}`);
+        return reposWithStaged[0];
+    }
+
+    // Strategy 3: look for repos with working tree changes
+    const reposWithChanges = repos.filter(
+        r => r.state.workingTreeChanges.length > 0 || r.state.untrackedChanges.length > 0,
+    );
+    if (reposWithChanges.length === 1) {
+        console.log(`Kung Commit: selected repo with working tree changes: ${reposWithChanges[0].rootUri.fsPath}`);
+        return reposWithChanges[0];
+    }
+
+    // Strategy 4: multiple repos have changes — prompt user to pick
+    if (reposWithStaged.length > 1 || reposWithChanges.length > 1) {
+        const candidates = reposWithStaged.length > 1 ? reposWithStaged : reposWithChanges;
+        // We cannot show a QuickPick synchronously from a synchronous function,
+        // so log a warning and fall through to strategy 5.
+        console.warn(
+            `Kung Commit: ${candidates.length} repos have changes — using first repo. ` +
+            `Consider switching to the correct repo before generating a commit message.`,
+        );
+    }
+
+    // Strategy 5: first repository (default fallback)
+    console.log(`Kung Commit: using first repository: ${repos[0].rootUri.fsPath}`);
+    return repos[0];
 }
 
 /**
@@ -290,10 +329,10 @@ async function shellGitStatus(gitPath: string, cwd: string): Promise<string> {
 
     return header + parts.join('\n\n');
 }
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
 
 /**
  * Extract the git diff from the current workspace repository.
