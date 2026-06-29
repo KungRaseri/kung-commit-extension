@@ -3,9 +3,11 @@
 # Triggered on push to main. Builds the VS Code extension, packages it as a .vsix,
 # and creates a version tag. The tag push triggers the Release workflow.
 #
-# IMPORTANT: Requires a PAT_TOKEN secret with `repo` scope in the repository
-# (Settings → Secrets and variables → Actions). The default GITHUB_TOKEN cannot
-# trigger downstream workflows, but PAT_TOKEN can.
+# IMPORTANT: Requires a PAT_TOKEN secret — a fine-grained personal access token
+# (Settings → Developer settings → Fine-grained tokens) with "Contents" repository
+# permissions set to "Read and Write". Store it as a repository secret at
+# Settings → Secrets and variables → Actions with name PAT_TOKEN.
+# The default GITHUB_TOKEN cannot trigger downstream workflows, but a PAT can.
 #
 # Version format: [major].[minor].[patch].[build]
 #   - [major].[minor].[patch]  from package.json (manually incremented by developer)
@@ -13,7 +15,7 @@
 #   - Tag: v0.1.10.1234
 #
 # Manual trigger:
-#   gh workflow run ci-web.yml --ref main
+#   gh workflow run ci.yml --ref main
 
 name: CI - Build and Package
 
