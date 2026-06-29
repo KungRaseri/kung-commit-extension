@@ -2,7 +2,7 @@
   "name": "kung-commit",
   "displayName": "Kung Commit",
   "description": "Generate conventional commit messages from your git changes using AI",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "publisher": "kung-commit",
   "license": "MIT",
   "engines": {
