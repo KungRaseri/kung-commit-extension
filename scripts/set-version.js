@@ -1,11 +1,11 @@
 /**
- * Pre-packaging script: computes the full version by appending the total git
- * commit count to the base semver from package.json, then writes it back so
- * vsce (or any other packager) picks it up.
+ * Pre-packaging script: computes the full version by replacing the patch
+ * segment of the base semver from package.json with the total git commit
+ * count, then writes it back so vsce (or any other packager) picks it up.
  *
  *   Base version:  0.2.0          (from package.json)
  *   Commit count:  11
- *   Full version:  0.2.0.11       (written to package.json)
+ *   Full version:  0.2.11         (written to package.json)
  *
  * The original package.json is backed up to package.json.backup so it can be
  * restored by scripts/restore-version.js after packaging.
@@ -33,7 +33,9 @@ try {
   totalCommits = '0';
 }
 
-const newVersion = `${baseVersion}.${totalCommits}`;
+// Strip the patch segment from the base version (e.g., "0.2.0" → "0.2")
+const baseVersionWithoutPatch = baseVersion.replace(/\.\d+$/, '');
+const newVersion = `${baseVersionWithoutPatch}.${totalCommits}`;
 
 // ── Guard: skip if backup already exists (prevents overwriting on re-run) ───
 if (fs.existsSync(BACKUP_PATH)) {

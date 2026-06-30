@@ -5,7 +5,7 @@
 # GitHub Release with the .vsix artifact attached.
 #
 # Manual trigger:
-#   gh workflow run release.yml -f tag=v0.1.10.1423
+#   gh workflow run release.yml -f tag=v0.1.1423
 #
 # This workflow uses the default GITHUB_TOKEN (no PAT needed) because it does
 # not push commits or tags — it only creates a Release. The CI workflow uses a
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to release (e.g., v0.1.10.1423)'
+        description: 'Existing tag to release (e.g., v0.1.1423)'
         required: true
 
 permissions:

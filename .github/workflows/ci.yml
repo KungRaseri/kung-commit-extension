@@ -9,10 +9,10 @@
 # Settings → Secrets and variables → Actions with name PAT_TOKEN.
 # The default GITHUB_TOKEN cannot trigger downstream workflows, but a PAT can.
 #
-# Version format: [major].[minor].[patch].[build]
-#   - [major].[minor].[patch]  from package.json (manually incremented by developer)
-#   - [build]                  total number of commits in the repository
-#   - Tag: v0.1.10.1234
+# Version format: [major].[minor].[build]
+#   - [major].[minor]           from package.json (manually incremented by developer)
+#   - [build]                   total number of commits in the repository
+#   - Tag: v0.1.1234
 #
 # Manual trigger:
 #   gh workflow run ci.yml --ref main
@@ -68,9 +68,12 @@ jobs:
         # Count total commits in the repository
         TOTAL_COMMITS=$(git rev-list --count HEAD)
 
-        # Build the final version: [major].[minor].[patch].[total_commits]
-        # e.g., 0.1.10.1423
-        VERSION="${PKG_VERSION}.${TOTAL_COMMITS}"
+        # Strip the patch segment to get major.minor (e.g., "0.1.10" → "0.1")
+        MAJOR_MINOR="${PKG_VERSION%.*}"
+
+        # Build the final version: [major].[minor].[total_commits]
+        # e.g., 0.1.1423
+        VERSION="${MAJOR_MINOR}.${TOTAL_COMMITS}"
 
         echo "pkg-version=$PKG_VERSION"     >> "$GITHUB_OUTPUT"
         echo "total-commits=$TOTAL_COMMITS"  >> "$GITHUB_OUTPUT"
