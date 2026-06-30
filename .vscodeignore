@@ -1,5 +1,7 @@
 .vscode/**
 .gitignore
+package.json.backup
+scripts/**
 **/*.ts
 **/*.map
 src/**

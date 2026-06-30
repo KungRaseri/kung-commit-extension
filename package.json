@@ -139,7 +139,7 @@
         },
         "kungCommit.prPromptTemplate": {
           "type": "string",
-          "default": "Generate a pull request title and description for the code changes below.\n\nRules:\n1. The FIRST LINE must be the PR title only (max 72 characters).\n2. After a blank line, provide the PR description body using Markdown.\n3. Include these sections in the description:\n   - ## Summary \u2014 brief overview of what this PR does\n   - ## Changes \u2014 bullet list of key technical changes\n   - ## Breaking Changes \u2014 note if any, or \"None\"\n   - ## Related Issues \u2014 reference any related issues\n4. Be concise but thorough. Focus on the WHAT and WHY.\n5. Use present tense, imperative mood.\n\nBranch: {{baseBranch}} -> {{headBranch}}\n\nChanges:\n{{diff}}",
+          "default": "Generate a pull request title and description for the code changes below.\n\nRules:\n1. The FIRST LINE must be the PR title only (max 72 characters).\n2. After a blank line, provide the PR description body using Markdown.\n3. Include these sections in the description:\n   - ## Summary — brief overview of what this PR does\n   - ## Changes — bullet list of key technical changes\n   - ## Breaking Changes — note if any, or \"None\"\n   - ## Related Issues — reference any related issues\n4. Be concise but thorough. Focus on the WHAT and WHY.\n5. Use present tense, imperative mood.\n\nBranch: {{baseBranch}} -> {{headBranch}}\n\nChanges:\n{{diff}}",
           "markdownDescription": "Custom prompt template for PR description generation. Use `{{diff}}`, `{{baseBranch}}`, and `{{headBranch}}` as placeholders."
         },
         "kungCommit.autoOpenPRView": {
@@ -155,7 +155,9 @@
     "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
     "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch=forever",
     "lint": "echo linting",
-    "package": "vsce package"
+    "prepackage": "node scripts/set-version.js",
+    "package": "vsce package",
+    "postpackage": "node scripts/restore-version.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.96.0",
