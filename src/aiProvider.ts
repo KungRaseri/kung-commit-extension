@@ -191,7 +191,8 @@ abstract class BaseProvider {
      * Helper to parse a JSON response from an OpenAI-compatible API.
      */
     protected parseOpenAIResponse(data: any): string {
-        return (data.choices?.[0]?.message?.content || '').trim();
+        const message = data.choices?.[0]?.message;
+        return (message?.content || message?.reasoning_content || '').trim();
     }
 
     /**
@@ -234,6 +235,8 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
             }),
         });
 
+        console.log('[Kung Commit] HTTP status:', response.status, response.statusText);
+
         if (!response.ok) {
             const errorBody = await response.text();
             const err = new Error(`OpenAI API error (${response.status}): ${errorBody}`);
@@ -242,7 +245,14 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
         }
 
         const data = await response.json();
-        return this.parseOpenAIResponse(data);
+        console.log('[Kung Commit] Raw API response:', JSON.stringify(data).substring(0, 1000));
+
+        const message = this.parseOpenAIResponse(data);
+        if (!message) {
+            console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
+            throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
+        }
+        return message;
     }
 
     protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
@@ -316,6 +326,8 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
             }),
         });
 
+        console.log('[Kung Commit] HTTP status:', response.status, response.statusText);
+
         if (!response.ok) {
             const errorBody = await response.text();
             const err = new Error(`DeepSeek API error (${response.status}): ${errorBody}`);
@@ -324,7 +336,14 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
         }
 
         const data = await response.json();
-        return this.parseOpenAIResponse(data);
+        console.log('[Kung Commit] Raw API response:', JSON.stringify(data).substring(0, 1000));
+
+        const message = this.parseOpenAIResponse(data);
+        if (!message) {
+            console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
+            throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
+        }
+        return message;
     }
 
     protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
@@ -396,6 +415,8 @@ export class AnthropicProvider extends BaseProvider implements AIProvider {
             }),
         });
 
+        console.log('[Kung Commit] HTTP status:', response.status, response.statusText);
+
         if (!response.ok) {
             const errorBody = await response.text();
             const err = new Error(`Anthropic API error (${response.status}): ${errorBody}`);
@@ -404,7 +425,14 @@ export class AnthropicProvider extends BaseProvider implements AIProvider {
         }
 
         const data = await response.json();
-        return this.parseAnthropicResponse(data);
+        console.log('[Kung Commit] Raw API response:', JSON.stringify(data).substring(0, 1000));
+
+        const message = this.parseAnthropicResponse(data);
+        if (!message) {
+            console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
+            throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
+        }
+        return message;
     }
 
     protected async doGeneratePR(diff: string, baseBranch?: string, headBranch?: string): Promise<string> {
@@ -492,6 +520,8 @@ export class CustomProvider extends BaseProvider implements AIProvider {
             }),
         });
 
+        console.log('[Kung Commit] HTTP status:', response.status, response.statusText);
+
         if (!response.ok) {
             const errorBody = await response.text();
             const err = new Error(`Custom API error (${response.status}): ${errorBody}`);
@@ -500,12 +530,14 @@ export class CustomProvider extends BaseProvider implements AIProvider {
         }
 
         const data = await response.json();
+        console.log('[Kung Commit] Raw API response:', JSON.stringify(data).substring(0, 1000));
 
         // Try OpenAI-like response first, then Anthropic-like fallback
         const message =
             this.parseOpenAIResponse(data) || this.parseAnthropicResponse(data) || '';
 
         if (!message) {
+            console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error(
                 'Could not parse response from custom endpoint. Expected OpenAI or Anthropic format.',
             );
