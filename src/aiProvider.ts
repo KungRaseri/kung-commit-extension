@@ -191,8 +191,7 @@ abstract class BaseProvider {
      * Helper to parse a JSON response from an OpenAI-compatible API.
      */
     protected parseOpenAIResponse(data: any): string {
-        const message = data.choices?.[0]?.message;
-        return (message?.content || message?.reasoning_content || '').trim();
+        return (data.choices?.[0]?.message?.content || '').trim();
     }
 
     /**
@@ -249,6 +248,11 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
+            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (hasReasoning) {
+                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
+                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
         }
@@ -340,6 +344,11 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
+            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (hasReasoning) {
+                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
+                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
         }
@@ -537,6 +546,11 @@ export class CustomProvider extends BaseProvider implements AIProvider {
             this.parseOpenAIResponse(data) || this.parseAnthropicResponse(data) || '';
 
         if (!message) {
+            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (hasReasoning) {
+                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
+                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error(
                 'Could not parse response from custom endpoint. Expected OpenAI or Anthropic format.',
