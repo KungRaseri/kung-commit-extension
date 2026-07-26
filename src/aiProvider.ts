@@ -295,7 +295,7 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
                     { role: 'user', content: prompt },
                 ],
                 temperature: 0.3,
-                max_tokens: 300,
+                max_tokens: 1024,
             }),
         });
 
@@ -313,10 +313,12 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
-            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (hasReasoning) {
-                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
-                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (reasoning) {
+                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
+                // The reasoning may contain the commit message mixed with CoT —
+                // sanitizeCommitMessage will extract the conventional-commit line.
+                return reasoning.trim();
             }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
@@ -391,7 +393,7 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
                     { role: 'user', content: prompt },
                 ],
                 temperature: 0.3,
-                max_tokens: 300,
+                max_tokens: 1024,
             }),
         });
 
@@ -409,10 +411,12 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
-            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (hasReasoning) {
-                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
-                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (reasoning) {
+                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
+                // The reasoning may contain the commit message mixed with CoT —
+                // sanitizeCommitMessage will extract the conventional-commit line.
+                return reasoning.trim();
             }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
@@ -590,7 +594,7 @@ export class CustomProvider extends BaseProvider implements AIProvider {
                     { role: 'user', content: prompt },
                 ],
                 temperature: 0.3,
-                max_tokens: 300,
+                max_tokens: 1024,
             }),
         });
 
@@ -611,10 +615,12 @@ export class CustomProvider extends BaseProvider implements AIProvider {
             this.parseOpenAIResponse(data) || this.parseAnthropicResponse(data) || '';
 
         if (!message) {
-            const hasReasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (hasReasoning) {
-                console.error('[Kung Commit] Model returned reasoning_content but no content. The model is using chain-of-thought reasoning. The prompt may need to instruct the model to output the commit message in its content field.');
-                throw new Error('The AI model returned reasoning but no commit message. Try updating the prompt template to explicitly request the commit message without explanation.');
+            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
+            if (reasoning) {
+                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
+                // The reasoning may contain the commit message mixed with CoT —
+                // sanitizeCommitMessage will extract the conventional-commit line.
+                return reasoning.trim();
             }
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
             throw new Error(
