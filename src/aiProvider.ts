@@ -82,6 +82,59 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Response sanitization
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitize the AI-generated commit message by stripping common
+ * explanatory prefixes, markdown formatting, and code fences that
+ * some models add despite prompt instructions telling them not to.
+ *
+ * Strategy (in order):
+ *   1. Strip markdown code fences (``` ... ```)
+ *   2. Strip known explanatory prefixes (case-insensitive)
+ *   3. If the text contains a conventional-commit line after fluff,
+ *      extract from that line onward
+ *   4. Trim and return
+ *
+ * Always returns a non-empty string (falls back to the original raw text).
+ */
+function sanitizeCommitMessage(raw: string): string {
+    let message = raw.trim();
+
+    // 1. Strip markdown code fences wrapping the entire message
+    //    e.g. ```\nfeat: foo\n```  →  feat: foo
+    message = message.replace(/^```[\w]*\s*\n/gm, '').replace(/\n```\s*$/gm, '');
+    message = message.trim();
+
+    // 2. Strip common explanatory prefixes (case-insensitive)
+    const prefixPatterns = [
+        /^(here is|the commit message is|commit message:|suggested commit message:|i suggest|here's|recommended commit message:|the recommended commit message is)[:\s]*\n*/i,
+    ];
+
+    for (const pattern of prefixPatterns) {
+        const match = message.match(pattern);
+        if (match) {
+            message = message.substring(match[0].length).trim();
+            break;
+        }
+    }
+
+    // 3. If the message contains a conventional-commit line anywhere after
+    //    some fluff text, extract from that line onward.
+    //    e.g. "Based on the diff, here is the commit:\nfeat(auth): add login\n..."
+    //    →   "feat(auth): add login\n..."
+    const conventionalCommitRegex =
+        /^(feat|fix|chore|docs|style|refactor|perf|test|ci|build|revert)(\(.+?\))?:\s*.+/m;
+    const ccMatch = message.match(conventionalCommitRegex);
+    if (ccMatch && ccMatch.index !== undefined && ccMatch.index > 0) {
+        message = message.substring(ccMatch.index).trim();
+    }
+
+    return message || raw.trim();
+}
+
+// ---------------------------------------------------------------------------
 // Base provider with shared logic
 // ---------------------------------------------------------------------------
 
@@ -112,10 +165,19 @@ abstract class BaseProvider {
             `You are an expert developer generating a concise conventional commit message.` +
             localeInstruction +
             `\n\n` +
+            `CRITICAL: Your entire response must be ONLY the raw commit message. ` +
+            `Do NOT include ANY explanation, reasoning, commentary, analysis, ` +
+            `markdown formatting, code blocks, backticks, or prefixes like ` +
+            `"Here is" or "The commit message". Output the commit message directly.` +
+            `\n\n` +
+            `IMPORTANT: Consider ALL changes in the diff. Summarize the entire set of ` +
+            `modifications into one cohesive commit message. Do NOT focus on just one ` +
+            `file or one change — your message must reflect the overall diff.` +
+            `\n\n` +
             `Use the format: <type>(<scope>): <description>\n\n` +
             `Types: feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert\n\n` +
-            `Focus on the WHAT and WHY, not the HOW. Keep the first line under 72 characters.` +
-            ` If there are multiple changes, use a short summary as the header` +
+            `Keep the first line under 72 characters. Focus on the WHAT and WHY, not the HOW.` +
+            ` If there are multiple logical changes, use a short summary as the header` +
             ` with bullet points for details.`
         );
     }
@@ -164,11 +226,14 @@ abstract class BaseProvider {
     }
 
     /**
-     * Wrap the actual provider call in retry logic.
+     * Wrap the actual provider call in retry logic, then sanitize the
+     * response to strip any explanation or reasoning the model may have
+     * included despite prompt instructions.
      * Subclasses implement `doGenerate(diff): string`.
      */
     async generateCommitMessage(diff: string): Promise<string> {
-        return withRetry(() => this.doGenerate(diff));
+        const raw = await withRetry(() => this.doGenerate(diff));
+        return sanitizeCommitMessage(raw);
     }
 
     /**

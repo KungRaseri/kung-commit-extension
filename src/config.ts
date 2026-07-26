@@ -50,7 +50,7 @@ export function getConfig(): Config {
         customEndpoint: cfg.get<string>('customEndpoint', ''),
         customModel: cfg.get<string>('customModel', ''),
         customHeaders: cfg.get<Record<string, string>>('customHeaders', {}),
-        promptTemplate: cfg.get<string>('promptTemplate', 'Generate a concise conventional commit message for these changes:\n\n{{diff}}'),
+        promptTemplate: cfg.get<string>('promptTemplate', 'Consider ALL changes in the diff below. Summarize the entire set of modifications into one cohesive commit message — do NOT focus on just one file or one change. Generate ONLY a conventional commit message. Output the commit message directly — no explanation, reasoning, or commentary:\n\n{{diff}}'),
         maxDiffChars: cfg.get<number>('maxDiffChars', 4000),
         locale: cfg.get<string>('locale', 'en'),
         autoPreview: cfg.get<boolean>('autoPreview', true),
