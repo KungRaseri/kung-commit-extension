@@ -112,7 +112,7 @@
         },
         "kungCommit.promptTemplate": {
           "type": "string",
-          "default": "Generate ONLY a concise conventional commit message for these changes. Do not include any explanation, analysis, or reasoning. Output only the commit message itself:\n\n{{diff}}",
+          "default": "Consider ALL changes in the diff below. Summarize the entire set of modifications into one cohesive commit message — do NOT focus on just one file or one change. Generate ONLY a conventional commit message. Output the commit message directly — no explanation, reasoning, or commentary:\n\n{{diff}}",
           "markdownDescription": "Custom prompt template. Use `{{diff}}` as placeholder for the git diff content. The prompt should explicitly instruct the model to output only the commit message without any explanation or reasoning."
         },
         "kungCommit.maxDiffChars": {

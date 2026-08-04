@@ -52,6 +52,13 @@ async function withRetry<T>(
 }
 
 function isRetryableError(error: any): boolean {
+    // Retry on errors explicitly marked retryable, e.g. the empty-content
+    // errors thrown by the providers (they set `retryable = true` — see the
+    // doGenerate empty-content handling). A retry usually produces a real
+    // commit message.
+    if (error.retryable === true) {
+        return true;
+    }
     // Retry on rate limits (429) and server errors (5xx)
     if (error.status === 429 || (error.status >= 500 && error.status < 600)) {
         return true;
@@ -95,7 +102,9 @@ function sleep(ms: number): Promise<void> {
  *   2. Strip known explanatory prefixes (case-insensitive)
  *   3. If the text contains a conventional-commit line after fluff,
  *      extract from that line onward
- *   4. Trim and return
+ *   4. Strip trailing reasoning/commentary after the message body
+ *      (keep header, bullets, and continuation lines)
+ *   5. Trim and return
  *
  * Always returns a non-empty string (falls back to the original raw text).
  */
@@ -131,6 +140,36 @@ function sanitizeCommitMessage(raw: string): string {
         message = message.substring(ccMatch.index).trim();
     }
 
+    // 4. Defense-in-depth: strip trailing reasoning/commentary that appears
+    //    AFTER the commit-message body. Keep the header line and any lines
+    //    that (after trimming) start with a bullet (`-`, `*`, `•`) or a
+    //    continuation indent; drop everything from the first subsequent
+    //    plain-prose line onward.
+    const keptLines: string[] = [];
+    let droppedTrailing = false;
+    message.split('\n').forEach((line, index) => {
+        const trimmed = line.trim();
+        if (index === 0) {
+            // The header line is always part of the commit message.
+            keptLines.push(line);
+        } else if (!droppedTrailing) {
+            const isBullet = /^[-*•]/.test(trimmed);
+            const isContinuation = trimmed !== '' && /^\s/.test(line);
+            const isBlank = trimmed === '';
+            if (isBullet || isContinuation || isBlank) {
+                keptLines.push(line);
+            } else {
+                // First plain-prose line after the header marks the start of
+                // trailing reasoning/commentary — drop it and everything after.
+                droppedTrailing = true;
+            }
+        }
+    });
+    message = keptLines.join('\n').trim();
+
+    // NOTE: with the reasoning_content fallback removed (fix #1), `raw` should
+    // never contain chain-of-thought text. This fallback only guards against
+    // an empty result after all sanitization.
     return message || raw.trim();
 }
 
@@ -313,15 +352,18 @@ export class OpenAIProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
-            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (reasoning) {
-                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
-                // The reasoning may contain the commit message mixed with CoT —
-                // sanitizeCommitMessage will extract the conventional-commit line.
-                return reasoning.trim();
-            }
+            // NEVER surface `reasoning_content` (the model's chain-of-thought).
+            // When `content` is empty, report a clear error and mark it
+            // retryable (`retryable = true` — see isRetryableError) so a retry
+            // can produce a non-empty response.
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
-            throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
+            const err = new Error(
+                'OpenAI API returned no content for the commit message. If you are using a ' +
+                'reasoning model, it may have consumed its output budget on chain-of-thought ' +
+                'reasoning — try a different (non-reasoning) model or retry.',
+            );
+            (err as any).retryable = true;
+            throw err;
         }
         return message;
     }
@@ -411,15 +453,18 @@ export class DeepSeekProvider extends BaseProvider implements AIProvider {
 
         const message = this.parseOpenAIResponse(data);
         if (!message) {
-            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (reasoning) {
-                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
-                // The reasoning may contain the commit message mixed with CoT —
-                // sanitizeCommitMessage will extract the conventional-commit line.
-                return reasoning.trim();
-            }
+            // NEVER surface `reasoning_content` (the model's chain-of-thought).
+            // When `content` is empty, report a clear error and mark it
+            // retryable (`retryable = true` — see isRetryableError) so a retry
+            // can produce a non-empty response.
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
-            throw new Error('The AI provider returned an empty message. The API response format may have changed. Check the "Kung Commit" output channel for raw response details.');
+            const err = new Error(
+                'DeepSeek API returned no content for the commit message. If you are using a ' +
+                'reasoning model (e.g., deepseek-reasoner), it may have consumed its output ' +
+                'budget on chain-of-thought reasoning — try a different (non-reasoning) model or retry.',
+            );
+            (err as any).retryable = true;
+            throw err;
         }
         return message;
     }
@@ -615,17 +660,18 @@ export class CustomProvider extends BaseProvider implements AIProvider {
             this.parseOpenAIResponse(data) || this.parseAnthropicResponse(data) || '';
 
         if (!message) {
-            const reasoning = (data as any).choices?.[0]?.message?.reasoning_content;
-            if (reasoning) {
-                console.warn('[Kung Commit] content was empty; falling back to reasoning_content');
-                // The reasoning may contain the commit message mixed with CoT —
-                // sanitizeCommitMessage will extract the conventional-commit line.
-                return reasoning.trim();
-            }
+            // NEVER surface `reasoning_content` (the model's chain-of-thought).
+            // When `content` is empty, report a clear error and mark it
+            // retryable (`retryable = true` — see isRetryableError) so a retry
+            // can produce a non-empty response.
             console.error('[Kung Commit] Parsed empty message. Raw response:', JSON.stringify(data).substring(0, 1000));
-            throw new Error(
-                'Could not parse response from custom endpoint. Expected OpenAI or Anthropic format.',
+            const err = new Error(
+                'Could not parse a commit message from the custom endpoint (empty content). ' +
+                'If you are using a reasoning model, it may have consumed its output budget on ' +
+                'chain-of-thought reasoning — try a different (non-reasoning) model or retry.',
             );
+            (err as any).retryable = true;
+            throw err;
         }
 
         return message;
