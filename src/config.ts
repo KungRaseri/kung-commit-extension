@@ -18,22 +18,35 @@ export interface Config {
 }
 
 /**
- * Default prompt template for PR title & description generation.
- * Supports {{diff}}, {{baseBranch}}, {{headBranch}} placeholders.
+ * Default prompt templates.
+ *
+ * These only supply the task context and the diff. The output-format rules
+ * live in the provider system prompts (see `buildSystemPrompt` and
+ * `buildPRSystemPrompt` in aiProvider.ts) so that they cannot be weakened
+ * by editing a user-facing template.
+ *
+ * NOTE: Keep these strings in sync with the matching defaults in package.json
+ * (`kungCommit.promptTemplate`, `kungCommit.prPromptTemplate`).
  */
-const DEFAULT_PR_PROMPT_TEMPLATE = [
-    'Generate a pull request title and description for the code changes below.',
+
+/** Supports the {{diff}} placeholder. */
+const DEFAULT_COMMIT_PROMPT_TEMPLATE = [
+    'Generate a commit message for the diff below.',
     '',
-    'Rules:',
-    '1. The FIRST LINE must be the PR title only (max 72 characters).',
-    '2. After a blank line, provide the PR description body using Markdown.',
-    '3. Include these sections in the description:',
-    '   - ## Summary \u2014 brief overview of what this PR does',
-    '   - ## Changes \u2014 bullet list of key technical changes',
-    '   - ## Breaking Changes \u2014 note if any, or "None"',
-    '   - ## Related Issues \u2014 reference any related issues',
-    '4. Be concise but thorough. Focus on the WHAT and WHY.',
-    '5. Use present tense, imperative mood.',
+    '{{diff}}',
+].join('\n');
+
+/** Supports {{diff}}, {{baseBranch}}, {{headBranch}} placeholders. */
+const DEFAULT_PR_PROMPT_TEMPLATE = [
+    'Write a pull request title and description for the changes below.',
+    '',
+    'Include these sections in the description:',
+    '- ## Summary \u2014 brief overview of what this PR does',
+    '- ## Changes \u2014 bullet list of key technical changes',
+    '- ## Breaking Changes \u2014 describe any, or "None"',
+    '- ## Related Issues \u2014 reference any, or "None"',
+    '',
+    'Be concise but thorough. Focus on the WHAT and WHY.',
     '',
     'Branch: {{baseBranch}} -> {{headBranch}}',
     '',
@@ -50,7 +63,7 @@ export function getConfig(): Config {
         customEndpoint: cfg.get<string>('customEndpoint', ''),
         customModel: cfg.get<string>('customModel', ''),
         customHeaders: cfg.get<Record<string, string>>('customHeaders', {}),
-        promptTemplate: cfg.get<string>('promptTemplate', 'Consider ALL changes in the diff below. Summarize the entire set of modifications into one cohesive commit message — do NOT focus on just one file or one change. Generate ONLY a conventional commit message. Output the commit message directly — no explanation, reasoning, or commentary:\n\n{{diff}}'),
+        promptTemplate: cfg.get<string>('promptTemplate', DEFAULT_COMMIT_PROMPT_TEMPLATE),
         maxDiffChars: cfg.get<number>('maxDiffChars', 4000),
         locale: cfg.get<string>('locale', 'en'),
         autoPreview: cfg.get<boolean>('autoPreview', true),

@@ -15,7 +15,7 @@ Supports **OpenAI**, **Anthropic** (Claude), **DeepSeek**, and any **OpenAI-comp
 
 Click the **Kung Commit** button in the Source Control toolbar to automatically generate a conventional commit message from your staged (or unstaged) changes.
 
-- [Conventional Commits](https://www.conventionalcommits.org/) format (`<type>(<scope>): <description>`)
+- [Conventional Commits](https://www.conventionalcommits.org/)-style format: `type(sub-type): summary` followed by a bullet list of changes
 - Auto-detects staged diff first, falls back to unstaged
 - Configurable prompt templates
 - Multi-locale support for non-English messages
@@ -101,7 +101,7 @@ All settings are under the `kungCommit.*` namespace.
 
 | Setting                        | Default                                          | Description                                      |
 |--------------------------------|--------------------------------------------------|--------------------------------------------------|
-| `kungCommit.promptTemplate`    | `Generate a concise conventional commit message...` | Prompt template (`{{diff}}` placeholder)          |
+| `kungCommit.promptTemplate`    | `Generate a commit message for the diff below.`  | Prompt template (`{{diff}}` placeholder)          |
 | `kungCommit.maxDiffChars`      | `4000`                                           | Max diff characters sent to the AI                |
 | `kungCommit.locale`            | `en`                                             | Locale for generated messages (e.g., `ja`, `zh-CN`) |
 | `kungCommit.autoPreview`       | `true`                                           | Show preview before inserting into input box      |
@@ -138,13 +138,26 @@ All settings are under the `kungCommit.*` namespace.
 
 ## Prompt Templates
 
-You can customize the prompt sent to the AI using the following placeholders:
+You can customize the prompt sent to the AI using the following placeholders. For commit messages, the output format is enforced by the extension (system prompt + response normalization), so custom templates change the context sent with the diff but cannot weaken the structure.
 
 | Placeholder      | Available In               | Description                     |
 |------------------|----------------------------|---------------------------------|
 | `{{diff}}`       | Commit & PR templates      | The Git diff content            |
 | `{{baseBranch}}` | PR template only           | Detected base branch name       |
 | `{{headBranch}}` | PR template only           | Current feature branch name     |
+
+### Commit Message Format
+
+Generated commit messages always follow this structure:
+
+```
+type(sub-type): brief summary of the changes
+
+- more detailed information about a specific change
+- more detailed information about another change
+```
+
+`type` is one of `feat`, `fix`, `docs`, `refactor`, `style`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. `sub-type` is a short lowercase area name such as `web`, `api`, `ui`, `tests`, `docs`, or `deps`. The first line is at most 72 characters, and the body contains 1-5 bullet points covering all changes in the diff.
 
 ### Example: Custom Commit Prompt
 

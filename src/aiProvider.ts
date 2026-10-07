@@ -95,7 +95,13 @@ function sleep(ms: number): Promise<void> {
 /**
  * Sanitize the AI-generated commit message by stripping common
  * explanatory prefixes, markdown formatting, and code fences that
- * some models add despite prompt instructions telling them not to.
+ * some models add despite prompt instructions telling them not to,
+ * then normalize the body to the required shape:
+ *
+ *   type(sub-type): brief summary
+ *
+ *   - detail
+ *   - detail
  *
  * Strategy (in order):
  *   1. Strip markdown code fences (``` ... ```)
@@ -104,7 +110,8 @@ function sleep(ms: number): Promise<void> {
  *      extract from that line onward
  *   4. Strip trailing reasoning/commentary after the message body
  *      (keep header, bullets, and continuation lines)
- *   5. Trim and return
+ *   5. Normalize bullets to `-` and insert a blank line after the header
+ *   6. Trim and return
  *
  * Always returns a non-empty string (falls back to the original raw text).
  */
@@ -167,6 +174,15 @@ function sanitizeCommitMessage(raw: string): string {
     });
     message = keptLines.join('\n').trim();
 
+    // 5. Normalize the body to the required format: `-` bullets and one blank
+    //    line between the header and the first bullet.
+    message = message.replace(/^([ \t]*)[-*•]\s+/gm, '$1- ');
+    const normalizedLines = message.split('\n');
+    if (normalizedLines.length > 1 && /^-/.test(normalizedLines[1].trim())) {
+        normalizedLines.splice(1, 0, '');
+    }
+    message = normalizedLines.join('\n').trim();
+
     // NOTE: with the reasoning_content fallback removed (fix #1), `raw` should
     // never contain chain-of-thought text. This fallback only guards against
     // an empty result after all sanitization.
@@ -197,27 +213,34 @@ abstract class BaseProvider {
         const locale = this.config.locale;
         const localeInstruction =
             locale !== 'en'
-                ? `\nRespond in ${locale}.`
+                ? `\n\nWrite the summary and bullet points in the language for locale ` +
+                  `"${locale}". Keep <type> and <sub-type> in English.`
                 : '';
 
         return (
-            `You are an expert developer generating a concise conventional commit message.` +
+            `You are an expert developer writing a conventional commit message for a git diff.` +
             localeInstruction +
             `\n\n` +
-            `CRITICAL: Your entire response must be ONLY the raw commit message. ` +
-            `Do NOT include ANY explanation, reasoning, commentary, analysis, ` +
-            `markdown formatting, code blocks, backticks, or prefixes like ` +
-            `"Here is" or "The commit message". Output the commit message directly.` +
+            `Output ONLY the commit message. No explanation, reasoning, markdown ` +
+            `code fences, or extra text.` +
             `\n\n` +
-            `IMPORTANT: Consider ALL changes in the diff. Summarize the entire set of ` +
-            `modifications into one cohesive commit message. Do NOT focus on just one ` +
-            `file or one change — your message must reflect the overall diff.` +
+            `Use EXACTLY this format:\n\n` +
+            `<type>(<sub-type>): <brief summary of the changes>\n\n` +
+            `- <specific change>\n` +
+            `- <specific change>` +
             `\n\n` +
-            `Use the format: <type>(<scope>): <description>\n\n` +
-            `Types: feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert\n\n` +
-            `Keep the first line under 72 characters. Focus on the WHAT and WHY, not the HOW.` +
-            ` If there are multiple logical changes, use a short summary as the header` +
-            ` with bullet points for details.`
+            `Rules:\n` +
+            `- <type> must be one of: feat, fix, docs, refactor, style, perf, test, build, ci, chore, revert.\n` +
+            `- <sub-type> is a short, lowercase area name such as web, api, ui, tests, docs, or deps.\n` +
+            `- The summary uses imperative mood, lowercase, and no trailing period; the entire first line is at most 72 characters.\n` +
+            `- After one blank line, list 1-5 bullets describing the concrete changes; each bullet starts with "- ".\n` +
+            `- Cover ALL changes in the diff, not just one file or one change. Never invent changes.` +
+            `\n\n` +
+            `Example:\n` +
+            `feat(api): add pagination to the users endpoint\n\n` +
+            `- Add limit and offset query parameters\n` +
+            `- Validate page size and return 400 for invalid input\n` +
+            `- Add tests for the new pagination logic`
         );
     }
 
@@ -241,18 +264,21 @@ abstract class BaseProvider {
         const locale = this.config.locale;
         const localeInstruction =
             locale !== 'en'
-                ? `\nRespond in ${locale}.`
+                ? `\n\nWrite the title and description in the language for locale "${locale}".`
                 : '';
 
         return (
-            `You are an expert developer reviewing a pull request.` +
+            `You are an expert developer writing a pull request title and description from a git diff.` +
             localeInstruction +
             `\n\n` +
-            `Generate a clear, structured PR title and description based on the git diff provided.` +
-            ` The first line of your response MUST be the PR title only (max 72 characters).` +
-            ` After a blank line, provide the full description body using Markdown.` +
-            ` Include sections for Summary, Changes, Breaking Changes, and Related Issues.` +
-            ` Focus on the WHAT and WHY, not the HOW.`
+            `Output ONLY the title and description. No explanation, reasoning, ` +
+            `markdown code fences, or extra text.` +
+            `\n\n` +
+            `The FIRST line MUST be the PR title only (max 72 characters). ` +
+            `After a blank line, output the description body in Markdown, following ` +
+            `the section structure requested in the user prompt.` +
+            `\n\n` +
+            `Cover ALL changes in the diff, not just one file or one change. Never invent changes.`
         );
     }
 

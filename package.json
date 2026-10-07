@@ -112,8 +112,8 @@
         },
         "kungCommit.promptTemplate": {
           "type": "string",
-          "default": "Consider ALL changes in the diff below. Summarize the entire set of modifications into one cohesive commit message — do NOT focus on just one file or one change. Generate ONLY a conventional commit message. Output the commit message directly — no explanation, reasoning, or commentary:\n\n{{diff}}",
-          "markdownDescription": "Custom prompt template. Use `{{diff}}` as placeholder for the git diff content. The prompt should explicitly instruct the model to output only the commit message without any explanation or reasoning."
+          "default": "Generate a commit message for the diff below.\n\n{{diff}}",
+          "markdownDescription": "Custom prompt template. Use `{{diff}}` as a placeholder for the git diff. The output format (`<type>(<sub-type>): <summary>` followed by bullet points) is enforced by the extension."
         },
         "kungCommit.maxDiffChars": {
           "type": "number",
@@ -139,8 +139,8 @@
         },
         "kungCommit.prPromptTemplate": {
           "type": "string",
-          "default": "Generate a pull request title and description for the code changes below.\n\nRules:\n1. The FIRST LINE must be the PR title only (max 72 characters).\n2. After a blank line, provide the PR description body using Markdown.\n3. Include these sections in the description:\n   - ## Summary — brief overview of what this PR does\n   - ## Changes — bullet list of key technical changes\n   - ## Breaking Changes — note if any, or \"None\"\n   - ## Related Issues — reference any related issues\n4. Be concise but thorough. Focus on the WHAT and WHY.\n5. Use present tense, imperative mood.\n\nBranch: {{baseBranch}} -> {{headBranch}}\n\nChanges:\n{{diff}}",
-          "markdownDescription": "Custom prompt template for PR description generation. Use `{{diff}}`, `{{baseBranch}}`, and `{{headBranch}}` as placeholders."
+          "default": "Write a pull request title and description for the changes below.\n\nInclude these sections in the description:\n- ## Summary — brief overview of what this PR does\n- ## Changes — bullet list of key technical changes\n- ## Breaking Changes — describe any, or \"None\"\n- ## Related Issues — reference any, or \"None\"\n\nBe concise but thorough. Focus on the WHAT and WHY.\n\nBranch: {{baseBranch}} -> {{headBranch}}\n\nChanges:\n{{diff}}",
+          "markdownDescription": "Custom prompt template for PR description generation. Use `{{diff}}`, `{{baseBranch}}`, and `{{headBranch}}` as placeholders. The title/description structure is built into the extension."
         },
         "kungCommit.autoOpenPRView": {
           "type": "boolean",
